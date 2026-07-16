@@ -1,0 +1,3 @@
+[default.extend-words]
+# "wip" is the product, not a typo of "whip"/"wipe"
+wip = "wip"
