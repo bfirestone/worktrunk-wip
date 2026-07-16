@@ -57,7 +57,14 @@ struct EnvGuard {
 impl Drop for EnvGuard {
     fn drop(&mut self) {
         if let Some(dir) = self.prev_dir.take() {
-            let _ = std::env::set_current_dir(dir);
+            // Non-panicking: a panic here during unwind would abort the
+            // process and mask the original test failure. With the prior
+            // cwd now captured under the lock (see `in_dir`/`with_env_config`
+            // below), `dir` is always the stable repo dir the test started
+            // in, so this is belt-and-suspenders.
+            if let Err(e) = std::env::set_current_dir(&dir) {
+                eprintln!("testutil: failed to restore cwd to {dir:?}: {e}");
+            }
         }
         match self.prev_config.take() {
             Some(v) => unsafe { std::env::set_var("WORKTRUNK_CONFIG_PATH", v) },
@@ -71,11 +78,18 @@ impl Drop for EnvGuard {
 /// from the developer's real user config), holding `TEST_LOCK` for the
 /// duration. Both are restored by `EnvGuard::drop`, so restoration still
 /// happens if `f` panics.
+///
+/// The lock is acquired *before* the previous cwd/env are captured — a
+/// struct literal's field initializers run in textual order, so capturing
+/// state first (as an inline `EnvGuard { prev_dir: ..., _lock: lock() }`)
+/// would read another thread's in-flight cwd mutation instead of the
+/// stable value this thread is about to restore to.
 pub(crate) fn in_dir<T>(dir: &Path, f: impl FnOnce() -> T) -> T {
+    let lock = lock();
     let _guard = EnvGuard {
-        prev_dir: Some(std::env::current_dir().unwrap()),
+        prev_dir: Some(std::env::current_dir().expect("cwd exists at capture")),
         prev_config: std::env::var_os("WORKTRUNK_CONFIG_PATH"),
-        _lock: lock(),
+        _lock: lock,
     };
     std::env::set_current_dir(dir).unwrap();
     unsafe { std::env::set_var("WORKTRUNK_CONFIG_PATH", dir.join("no-such-config.toml")) };
@@ -86,11 +100,16 @@ pub(crate) fn in_dir<T>(dir: &Path, f: impl FnOnce() -> T) -> T {
 /// for the duration (serializes against the cwd/env mutations `in_dir`
 /// performs for push/pull tests too). Restored by `EnvGuard::drop`, so
 /// restoration still happens if `f` panics.
+///
+/// As in `in_dir`, the lock is acquired before the previous env value is
+/// captured, so the capture can't observe another thread's in-flight
+/// mutation.
 pub(crate) fn with_env_config<T>(path: &Path, f: impl FnOnce() -> T) -> T {
+    let lock = lock();
     let _guard = EnvGuard {
         prev_dir: None,
         prev_config: std::env::var_os("WORKTRUNK_CONFIG_PATH"),
-        _lock: lock(),
+        _lock: lock,
     };
     unsafe { std::env::set_var("WORKTRUNK_CONFIG_PATH", path) };
     f()
