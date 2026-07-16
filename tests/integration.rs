@@ -39,7 +39,8 @@ fn wip(dir: &Path, args: &[&str], extra_env: &[(&str, &str)]) -> Output {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_wt-wip"));
     cmd.args(args)
         .current_dir(dir)
-        .env("WORKTRUNK_CONFIG_PATH", "/nonexistent-wt-wip-test");
+        .env("WORKTRUNK_CONFIG_PATH", "/nonexistent-wt-wip-test")
+        .env_remove("WORKTRUNK_PROJECT_CONFIG_PATH");
     for (k, v) in extra_env {
         cmd.env(k, v);
     }
