@@ -79,23 +79,10 @@ pub fn pull() -> anyhow::Result<PullResult> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testutil::{configure, git, in_dir};
     use std::fs;
     use std::path::Path;
     use std::process::Command;
-    use std::sync::Mutex;
-
-    static CWD_LOCK: Mutex<()> = Mutex::new(());
-
-    fn git(dir: &Path, args: &[&str]) {
-        let st = Command::new("git").args(args).current_dir(dir).status().unwrap();
-        assert!(st.success(), "git {args:?} failed in {dir:?}");
-    }
-
-    fn configure(clone: &Path) {
-        git(clone, &["config", "user.name", "test"]);
-        git(clone, &["config", "user.email", "test@example.com"]);
-        git(clone, &["config", "commit.gpgsign", "false"]);
-    }
 
     /// bare remote + two configured clones, seed commit pushed to main
     fn setup() -> (tempfile::TempDir, std::path::PathBuf, std::path::PathBuf) {
@@ -114,15 +101,6 @@ mod tests {
         git(dir.path(), &["clone", remote.to_str().unwrap(), b.to_str().unwrap()]);
         configure(&b);
         (dir, a, b)
-    }
-
-    fn in_dir<T>(dir: &Path, f: impl FnOnce() -> T) -> T {
-        let _guard = CWD_LOCK.lock().unwrap();
-        let prev = std::env::current_dir().unwrap();
-        std::env::set_current_dir(dir).unwrap();
-        let out = f();
-        std::env::set_current_dir(prev).unwrap();
-        out
     }
 
     fn commit_and_push(clone: &Path, file: &str) {

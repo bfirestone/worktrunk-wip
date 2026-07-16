@@ -103,17 +103,9 @@ pub fn push(stage: Option<StageMode>, message: Option<String>) -> anyhow::Result
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testutil::{configure, git, in_dir};
     use std::fs;
-    use std::path::Path;
     use std::process::Command;
-    use std::sync::Mutex;
-
-    static CWD_LOCK: Mutex<()> = Mutex::new(());
-
-    fn git(dir: &Path, args: &[&str]) {
-        let st = Command::new("git").args(args).current_dir(dir).status().unwrap();
-        assert!(st.success(), "git {args:?} failed in {dir:?}");
-    }
 
     /// bare remote + configured clone with one pushed commit on main
     fn setup() -> (tempfile::TempDir, std::path::PathBuf) {
@@ -122,24 +114,13 @@ mod tests {
         let clone = dir.path().join("clone");
         git(dir.path(), &["init", "--bare", remote.to_str().unwrap()]);
         git(dir.path(), &["clone", remote.to_str().unwrap(), clone.to_str().unwrap()]);
-        git(&clone, &["config", "user.name", "test"]);
-        git(&clone, &["config", "user.email", "test@example.com"]);
-        git(&clone, &["config", "commit.gpgsign", "false"]);
+        configure(&clone);
         git(&clone, &["checkout", "-b", "main"]);
         fs::write(clone.join("README.md"), "seed\n").unwrap();
         git(&clone, &["add", "-A"]);
         git(&clone, &["commit", "-m", "seed"]);
         git(&clone, &["push", "-u", "origin", "main"]);
         (dir, clone)
-    }
-
-    fn in_dir<T>(dir: &Path, f: impl FnOnce() -> T) -> T {
-        let _guard = CWD_LOCK.lock().unwrap();
-        let prev = std::env::current_dir().unwrap();
-        std::env::set_current_dir(dir).unwrap();
-        let out = f();
-        std::env::set_current_dir(prev).unwrap();
-        out
     }
 
     #[test]
@@ -190,9 +171,7 @@ mod tests {
         // Second clone advances the remote so the first clone's push is rejected.
         let other = dir.path().join("other");
         git(dir.path(), &["clone", dir.path().join("remote.git").to_str().unwrap(), other.to_str().unwrap()]);
-        git(&other, &["config", "user.name", "test"]);
-        git(&other, &["config", "user.email", "test@example.com"]);
-        git(&other, &["config", "commit.gpgsign", "false"]);
+        configure(&other);
         fs::write(other.join("other.txt"), "x\n").unwrap();
         git(&other, &["add", "-A"]);
         git(&other, &["commit", "-m", "other machine"]);

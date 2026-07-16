@@ -49,13 +49,9 @@ fn stage_from_file(path: &Path) -> Option<StageMode> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testutil::with_env_config;
     use std::fs;
     use std::process::Command;
-    use std::sync::Mutex;
-
-    /// `WORKTRUNK_CONFIG_PATH` is process-global and tests run in parallel;
-    /// every test that mutates it must hold this lock for the duration.
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     fn temp_repo() -> (tempfile::TempDir, Repository) {
         let dir = tempfile::tempdir().unwrap();
@@ -88,38 +84,33 @@ mod tests {
 
     #[test]
     fn missing_config_defaults_to_all() {
-        let _guard = ENV_LOCK.lock().unwrap();
         let (dir, repo) = temp_repo();
         // Point the user-config layer at a path that doesn't exist so this
         // test isn't at the mercy of the real user's `~/.config/worktrunk`.
-        unsafe { std::env::set_var("WORKTRUNK_CONFIG_PATH", dir.path().join("no-such-config.toml")) };
-        let result = resolve_stage_mode(None, &repo);
-        unsafe { std::env::remove_var("WORKTRUNK_CONFIG_PATH") };
+        let result = with_env_config(&dir.path().join("no-such-config.toml"), || {
+            resolve_stage_mode(None, &repo)
+        });
         assert_eq!(result, StageMode::All);
     }
 
     #[test]
     fn malformed_config_degrades_to_default() {
-        let _guard = ENV_LOCK.lock().unwrap();
         let (dir, repo) = temp_repo();
         fs::create_dir_all(dir.path().join(".config")).unwrap();
         fs::write(dir.path().join(".config/wt.toml"), "[wip]\nstage = \"banana\"\n").unwrap();
-        unsafe { std::env::set_var("WORKTRUNK_CONFIG_PATH", dir.path().join("no-such-config.toml")) };
-        let result = resolve_stage_mode(None, &repo);
-        unsafe { std::env::remove_var("WORKTRUNK_CONFIG_PATH") };
+        let result = with_env_config(&dir.path().join("no-such-config.toml"), || {
+            resolve_stage_mode(None, &repo)
+        });
         assert_eq!(result, StageMode::All);
     }
 
     #[test]
     fn user_config_applies_without_project_config() {
-        let _guard = ENV_LOCK.lock().unwrap();
         let (_dir, repo) = temp_repo();
         let user_dir = tempfile::tempdir().unwrap();
         let user_config = user_dir.path().join("config.toml");
         fs::write(&user_config, "[wip]\nstage = \"tracked\"\n").unwrap();
-        unsafe { std::env::set_var("WORKTRUNK_CONFIG_PATH", &user_config) };
-        let result = resolve_stage_mode(None, &repo);
-        unsafe { std::env::remove_var("WORKTRUNK_CONFIG_PATH") };
+        let result = with_env_config(&user_config, || resolve_stage_mode(None, &repo));
         assert_eq!(result, StageMode::Tracked);
     }
 

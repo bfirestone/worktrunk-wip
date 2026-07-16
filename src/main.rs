@@ -4,6 +4,8 @@
 mod config;
 mod pull;
 mod push;
+#[cfg(test)]
+mod testutil;
 mod types;
 mod util;
 
