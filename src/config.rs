@@ -70,15 +70,26 @@ mod tests {
     fn flag_beats_everything() {
         let (dir, repo) = temp_repo();
         fs::create_dir_all(dir.path().join(".config")).unwrap();
-        fs::write(dir.path().join(".config/wt.toml"), "[wip]\nstage = \"none\"\n").unwrap();
-        assert_eq!(resolve_stage_mode(Some(StageMode::Tracked), &repo), StageMode::Tracked);
+        fs::write(
+            dir.path().join(".config/wt.toml"),
+            "[wip]\nstage = \"none\"\n",
+        )
+        .unwrap();
+        assert_eq!(
+            resolve_stage_mode(Some(StageMode::Tracked), &repo),
+            StageMode::Tracked
+        );
     }
 
     #[test]
     fn project_config_applies_without_flag() {
         let (dir, repo) = temp_repo();
         fs::create_dir_all(dir.path().join(".config")).unwrap();
-        fs::write(dir.path().join(".config/wt.toml"), "[wip]\nstage = \"tracked\"\n").unwrap();
+        fs::write(
+            dir.path().join(".config/wt.toml"),
+            "[wip]\nstage = \"tracked\"\n",
+        )
+        .unwrap();
         assert_eq!(resolve_stage_mode(None, &repo), StageMode::Tracked);
     }
 
@@ -97,7 +108,11 @@ mod tests {
     fn malformed_config_degrades_to_default() {
         let (dir, repo) = temp_repo();
         fs::create_dir_all(dir.path().join(".config")).unwrap();
-        fs::write(dir.path().join(".config/wt.toml"), "[wip]\nstage = \"banana\"\n").unwrap();
+        fs::write(
+            dir.path().join(".config/wt.toml"),
+            "[wip]\nstage = \"banana\"\n",
+        )
+        .unwrap();
         let result = with_env_config(&dir.path().join("no-such-config.toml"), || {
             resolve_stage_mode(None, &repo)
         });

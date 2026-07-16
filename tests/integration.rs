@@ -6,7 +6,11 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 fn git(dir: &Path, args: &[&str]) {
-    let st = Command::new("git").args(args).current_dir(dir).status().unwrap();
+    let st = Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .status()
+        .unwrap();
     assert!(st.success(), "git {args:?} failed in {dir:?}");
 }
 
@@ -23,14 +27,20 @@ fn setup() -> (tempfile::TempDir, PathBuf, PathBuf) {
     let a = dir.path().join("a");
     let b = dir.path().join("b");
     git(dir.path(), &["init", "--bare", remote.to_str().unwrap()]);
-    git(dir.path(), &["clone", remote.to_str().unwrap(), a.to_str().unwrap()]);
+    git(
+        dir.path(),
+        &["clone", remote.to_str().unwrap(), a.to_str().unwrap()],
+    );
     configure(&a);
     git(&a, &["checkout", "-b", "main"]);
     fs::write(a.join("README.md"), "seed\n").unwrap();
     git(&a, &["add", "-A"]);
     git(&a, &["commit", "-m", "seed"]);
     git(&a, &["push", "-u", "origin", "main"]);
-    git(dir.path(), &["clone", remote.to_str().unwrap(), b.to_str().unwrap()]);
+    git(
+        dir.path(),
+        &["clone", remote.to_str().unwrap(), b.to_str().unwrap()],
+    );
     configure(&b);
     (dir, a, b)
 }
@@ -69,10 +79,13 @@ fn head_subject(dir: &Path) -> String {
 fn bare_invocation_pushes_and_pull_round_trips() {
     let (_dir, a, b) = setup();
     fs::write(a.join("wip.txt"), "from machine a\n").unwrap();
-    assert_ok(&wip(&a, &[], &[]));                    // bare = push shorthand
+    assert_ok(&wip(&a, &[], &[])); // bare = push shorthand
     assert!(head_subject(&a).starts_with("wip @ "));
     assert_ok(&wip(&b, &["pull"], &[]));
-    assert_eq!(fs::read_to_string(b.join("wip.txt")).unwrap(), "from machine a\n");
+    assert_eq!(
+        fs::read_to_string(b.join("wip.txt")).unwrap(),
+        "from machine a\n"
+    );
 }
 
 #[test]
@@ -89,7 +102,11 @@ fn message_override_and_stage_tracked() {
     // untracked file + tracked change; tracked mode must only take the latter
     fs::write(a.join("untracked.txt"), "new\n").unwrap();
     fs::write(a.join("README.md"), "seed changed\n").unwrap();
-    assert_ok(&wip(&a, &["push", "--stage", "tracked", "-m", "checkpoint: custom"], &[]));
+    assert_ok(&wip(
+        &a,
+        &["push", "--stage", "tracked", "-m", "checkpoint: custom"],
+        &[],
+    ));
     assert_eq!(head_subject(&a), "checkpoint: custom");
     // untracked.txt was not committed: still untracked in status
     let st = Command::new("git")
@@ -122,7 +139,11 @@ fn user_config_via_worktrunk_config_path_env() {
     let user_cfg = dir.path().join("user-config.toml");
     fs::write(&user_cfg, "[wip]\nstage = \"none\"\n").unwrap();
     fs::write(a.join("README.md"), "unstaged edit\n").unwrap();
-    let out = wip(&a, &[], &[("WORKTRUNK_CONFIG_PATH", user_cfg.to_str().unwrap())]);
+    let out = wip(
+        &a,
+        &[],
+        &[("WORKTRUNK_CONFIG_PATH", user_cfg.to_str().unwrap())],
+    );
     assert_ok(&out);
     // stage=none → no wip commit was created for the unstaged edit
     assert_eq!(head_subject(&a), "seed");
@@ -194,5 +215,8 @@ fn pull_preserves_dirty_non_conflicting_tree() {
     assert_ok(&wip(&a, &[], &[]));
     fs::write(b.join("scratch.txt"), "precious\n").unwrap();
     assert_ok(&wip(&b, &["pull"], &[]));
-    assert_eq!(fs::read_to_string(b.join("scratch.txt")).unwrap(), "precious\n");
+    assert_eq!(
+        fs::read_to_string(b.join("scratch.txt")).unwrap(),
+        "precious\n"
+    );
 }

@@ -60,12 +60,21 @@ mod tests {
 
     #[test]
     fn outcome_serialization_contract() {
-        assert_eq!(serde_json::to_string(&PushOutcome::Pushed).unwrap(), "\"pushed\"");
-        assert_eq!(serde_json::to_string(&PushOutcome::UpToDate).unwrap(), "\"up-to-date\"");
+        assert_eq!(
+            serde_json::to_string(&PushOutcome::Pushed).unwrap(),
+            "\"pushed\""
+        );
+        assert_eq!(
+            serde_json::to_string(&PushOutcome::UpToDate).unwrap(),
+            "\"up-to-date\""
+        );
         assert_eq!(
             serde_json::to_string(&PullOutcome::FastForwarded).unwrap(),
             "\"fast-forwarded\""
         );
-        assert_eq!(serde_json::to_string(&PullOutcome::UpToDate).unwrap(), "\"up-to-date\"");
+        assert_eq!(
+            serde_json::to_string(&PullOutcome::UpToDate).unwrap(),
+            "\"up-to-date\""
+        );
     }
 }

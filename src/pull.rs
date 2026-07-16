@@ -17,7 +17,9 @@ pub fn pull() -> anyhow::Result<PullResult> {
     // 1. Fetch the branch from the remote.
     eprintln!(
         "{}",
-        progress_message(cformat!("Fetching <bold>{branch}</> from <bold>{remote}</>..."))
+        progress_message(cformat!(
+            "Fetching <bold>{branch}</> from <bold>{remote}</>..."
+        ))
     );
     repo.run_command(&["fetch", &remote, "--end-of-options", &branch])
         .with_context(|| format!("Failed to fetch {branch} from {remote}"))?;
@@ -91,14 +93,20 @@ mod tests {
         let a = dir.path().join("a");
         let b = dir.path().join("b");
         git(dir.path(), &["init", "--bare", remote.to_str().unwrap()]);
-        git(dir.path(), &["clone", remote.to_str().unwrap(), a.to_str().unwrap()]);
+        git(
+            dir.path(),
+            &["clone", remote.to_str().unwrap(), a.to_str().unwrap()],
+        );
         configure(&a);
         git(&a, &["checkout", "-b", "main"]);
         fs::write(a.join("README.md"), "seed\n").unwrap();
         git(&a, &["add", "-A"]);
         git(&a, &["commit", "-m", "seed"]);
         git(&a, &["push", "-u", "origin", "main"]);
-        git(dir.path(), &["clone", remote.to_str().unwrap(), b.to_str().unwrap()]);
+        git(
+            dir.path(),
+            &["clone", remote.to_str().unwrap(), b.to_str().unwrap()],
+        );
         configure(&b);
         (dir, a, b)
     }
@@ -114,7 +122,7 @@ mod tests {
     fn pull_fast_forwards_and_counts() {
         let (_dir, a, b) = setup();
         commit_and_push(&a, "one.txt");
-        let result = in_dir(&b, || pull()).unwrap();
+        let result = in_dir(&b, pull).unwrap();
         assert_eq!(result.outcome, PullOutcome::FastForwarded);
         assert_eq!(result.commits_pulled, 1);
         assert!(b.join("one.txt").exists());
@@ -123,7 +131,7 @@ mod tests {
     #[test]
     fn pull_up_to_date_is_a_no_op() {
         let (_dir, _a, b) = setup();
-        let result = in_dir(&b, || pull()).unwrap();
+        let result = in_dir(&b, pull).unwrap();
         assert_eq!(result.outcome, PullOutcome::UpToDate);
         assert_eq!(result.commits_pulled, 0);
     }
@@ -133,7 +141,7 @@ mod tests {
         let (_dir, a, b) = setup();
         commit_and_push(&a, "one.txt");
         fs::write(b.join("local-scratch.txt"), "precious\n").unwrap();
-        let result = in_dir(&b, || pull()).unwrap();
+        let result = in_dir(&b, pull).unwrap();
         assert_eq!(result.outcome, PullOutcome::FastForwarded);
         assert_eq!(
             fs::read_to_string(b.join("local-scratch.txt")).unwrap(),
@@ -157,7 +165,7 @@ mod tests {
         // `PullResult` (foundation type in `src/types.rs`) derives only
         // `Serialize`, not `Debug`, so `Result::unwrap_err` (which requires
         // `T: Debug`) can't be used here; extract the error manually instead.
-        let err = match in_dir(&b, || pull()) {
+        let err = match in_dir(&b, pull) {
             Err(e) => e,
             Ok(_) => panic!("expected pull() to fail on divergence"),
         };
@@ -167,6 +175,9 @@ mod tests {
             .current_dir(&b)
             .output()
             .unwrap();
-        assert_eq!(head_before.stdout, head_after.stdout, "pull must not move HEAD on failure");
+        assert_eq!(
+            head_before.stdout, head_after.stdout,
+            "pull must not move HEAD on failure"
+        );
     }
 }

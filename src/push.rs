@@ -19,10 +19,12 @@ pub fn push(stage: Option<StageMode>, message: Option<String>) -> anyhow::Result
     // 1. Stage changes according to the resolved stage mode.
     match stage_mode {
         StageMode::All => {
-            repo.run_command(&["add", "-A"]).context("Failed to stage changes")?;
+            repo.run_command(&["add", "-A"])
+                .context("Failed to stage changes")?;
         }
         StageMode::Tracked => {
-            repo.run_command(&["add", "-u"]).context("Failed to stage tracked changes")?;
+            repo.run_command(&["add", "-u"])
+                .context("Failed to stage tracked changes")?;
         }
         StageMode::None => {
             // Stage nothing; commit only what's already in the index.
@@ -67,7 +69,9 @@ pub fn push(stage: Option<StageMode>, message: Option<String>) -> anyhow::Result
     //    per worktrunk's own run_command convention.
     eprintln!(
         "{}",
-        progress_message(cformat!("Pushing <bold>{branch}</> to <bold>{remote}</>..."))
+        progress_message(cformat!(
+            "Pushing <bold>{branch}</> to <bold>{remote}</>..."
+        ))
     );
     let push_args: Vec<&str> = if has_upstream {
         vec!["push", "--end-of-options", &remote, &branch]
@@ -92,12 +96,20 @@ pub fn push(stage: Option<StageMode>, message: Option<String>) -> anyhow::Result
     } else {
         eprintln!(
             "{}",
-            info_message(cformat!("Already up to date with <bold>{remote}/{branch}</>"))
+            info_message(cformat!(
+                "Already up to date with <bold>{remote}/{branch}</>"
+            ))
         );
         PushOutcome::UpToDate
     };
 
-    Ok(PushResult { branch, remote, committed, outcome, commits_pushed })
+    Ok(PushResult {
+        branch,
+        remote,
+        committed,
+        outcome,
+        commits_pushed,
+    })
 }
 
 #[cfg(test)]
@@ -113,7 +125,10 @@ mod tests {
         let remote = dir.path().join("remote.git");
         let clone = dir.path().join("clone");
         git(dir.path(), &["init", "--bare", remote.to_str().unwrap()]);
-        git(dir.path(), &["clone", remote.to_str().unwrap(), clone.to_str().unwrap()]);
+        git(
+            dir.path(),
+            &["clone", remote.to_str().unwrap(), clone.to_str().unwrap()],
+        );
         configure(&clone);
         git(&clone, &["checkout", "-b", "main"]);
         fs::write(clone.join("README.md"), "seed\n").unwrap();
@@ -162,7 +177,10 @@ mod tests {
             .current_dir(&clone)
             .output()
             .unwrap();
-        assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "checkpoint: custom");
+        assert_eq!(
+            String::from_utf8_lossy(&out.stdout).trim(),
+            "checkpoint: custom"
+        );
     }
 
     #[test]
@@ -170,7 +188,14 @@ mod tests {
         let (dir, clone) = setup();
         // Second clone advances the remote so the first clone's push is rejected.
         let other = dir.path().join("other");
-        git(dir.path(), &["clone", dir.path().join("remote.git").to_str().unwrap(), other.to_str().unwrap()]);
+        git(
+            dir.path(),
+            &[
+                "clone",
+                dir.path().join("remote.git").to_str().unwrap(),
+                other.to_str().unwrap(),
+            ],
+        );
         configure(&other);
         fs::write(other.join("other.txt"), "x\n").unwrap();
         git(&other, &["add", "-A"]);
@@ -203,6 +228,9 @@ mod tests {
             .current_dir(&clone)
             .output()
             .unwrap();
-        assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "origin/feature");
+        assert_eq!(
+            String::from_utf8_lossy(&out.stdout).trim(),
+            "origin/feature"
+        );
     }
 }

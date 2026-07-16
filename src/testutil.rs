@@ -22,7 +22,11 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 pub(crate) static TEST_LOCK: Mutex<()> = Mutex::new(());
 
 pub(crate) fn git(dir: &Path, args: &[&str]) {
-    let st = Command::new("git").args(args).current_dir(dir).status().unwrap();
+    let st = Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .status()
+        .unwrap();
     assert!(st.success(), "git {args:?} failed in {dir:?}");
 }
 
