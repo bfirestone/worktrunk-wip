@@ -21,25 +21,17 @@ pub fn resolve_stage_mode(flag: Option<StageMode>, repo: &Repository) -> StageMo
         .unwrap_or(StageMode::All)
 }
 
-/// `<repo toplevel>/.config/wt.toml` — worktrunk's project config.
+/// `<repo toplevel>/.config/wt.toml` — worktrunk's project config, resolved
+/// via worktrunk's own lookup (handles bare repos and the
+/// `WORKTRUNK_PROJECT_CONFIG_PATH` test-isolation override).
 fn project_config_path(repo: &Repository) -> Option<PathBuf> {
-    let root = repo.run_command(&["rev-parse", "--show-toplevel"]).ok()?;
-    Some(PathBuf::from(root.trim()).join(".config").join("wt.toml"))
+    repo.project_config_path().ok().flatten()
 }
 
-/// Worktrunk's user config discovery order:
-/// `$WORKTRUNK_CONFIG_PATH` → `$XDG_CONFIG_HOME/worktrunk/config.toml`
-/// → `$HOME/.config/worktrunk/config.toml`.
+/// Worktrunk's user config path, resolved via worktrunk's own discovery
+/// order (`WORKTRUNK_CONFIG_PATH` → platform config dir).
 fn user_config_path() -> Option<PathBuf> {
-    if let Ok(p) = std::env::var("WORKTRUNK_CONFIG_PATH") {
-        return Some(PathBuf::from(p));
-    }
-    if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
-        return Some(PathBuf::from(xdg).join("worktrunk").join("config.toml"));
-    }
-    std::env::var("HOME")
-        .ok()
-        .map(|h| PathBuf::from(h).join(".config").join("worktrunk").join("config.toml"))
+    worktrunk::config::config_path()
 }
 
 /// Generic lookup of `stage` in the `[wip]` table. Any failure → `None`.
@@ -59,6 +51,11 @@ mod tests {
     use super::*;
     use std::fs;
     use std::process::Command;
+    use std::sync::Mutex;
+
+    /// `WORKTRUNK_CONFIG_PATH` is process-global and tests run in parallel;
+    /// every test that mutates it must hold this lock for the duration.
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     fn temp_repo() -> (tempfile::TempDir, Repository) {
         let dir = tempfile::tempdir().unwrap();
@@ -91,16 +88,39 @@ mod tests {
 
     #[test]
     fn missing_config_defaults_to_all() {
-        let (_dir, repo) = temp_repo();
-        assert_eq!(resolve_stage_mode(None, &repo), StageMode::All);
+        let _guard = ENV_LOCK.lock().unwrap();
+        let (dir, repo) = temp_repo();
+        // Point the user-config layer at a path that doesn't exist so this
+        // test isn't at the mercy of the real user's `~/.config/worktrunk`.
+        unsafe { std::env::set_var("WORKTRUNK_CONFIG_PATH", dir.path().join("no-such-config.toml")) };
+        let result = resolve_stage_mode(None, &repo);
+        unsafe { std::env::remove_var("WORKTRUNK_CONFIG_PATH") };
+        assert_eq!(result, StageMode::All);
     }
 
     #[test]
     fn malformed_config_degrades_to_default() {
+        let _guard = ENV_LOCK.lock().unwrap();
         let (dir, repo) = temp_repo();
         fs::create_dir_all(dir.path().join(".config")).unwrap();
         fs::write(dir.path().join(".config/wt.toml"), "[wip]\nstage = \"banana\"\n").unwrap();
-        assert_eq!(resolve_stage_mode(None, &repo), StageMode::All);
+        unsafe { std::env::set_var("WORKTRUNK_CONFIG_PATH", dir.path().join("no-such-config.toml")) };
+        let result = resolve_stage_mode(None, &repo);
+        unsafe { std::env::remove_var("WORKTRUNK_CONFIG_PATH") };
+        assert_eq!(result, StageMode::All);
+    }
+
+    #[test]
+    fn user_config_applies_without_project_config() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let (_dir, repo) = temp_repo();
+        let user_dir = tempfile::tempdir().unwrap();
+        let user_config = user_dir.path().join("config.toml");
+        fs::write(&user_config, "[wip]\nstage = \"tracked\"\n").unwrap();
+        unsafe { std::env::set_var("WORKTRUNK_CONFIG_PATH", &user_config) };
+        let result = resolve_stage_mode(None, &repo);
+        unsafe { std::env::remove_var("WORKTRUNK_CONFIG_PATH") };
+        assert_eq!(result, StageMode::Tracked);
     }
 
     #[test]
