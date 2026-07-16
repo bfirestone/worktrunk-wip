@@ -19,17 +19,23 @@ pub fn pull() -> anyhow::Result<PullResult> {
         "{}",
         progress_message(cformat!("Fetching <bold>{branch}</> from <bold>{remote}</>..."))
     );
-    repo.run_command(&["fetch", &remote, &branch])
+    repo.run_command(&["fetch", &remote, "--end-of-options", &branch])
         .with_context(|| format!("Failed to fetch {branch} from {remote}"))?;
 
     let remote_ref = format!("{remote}/{branch}");
 
     // 2. How many commits is the remote ahead? 0 → already up to date.
-    let commits_pulled = repo
-        .run_command(&["rev-list", "--count", &format!("HEAD..{remote_ref}")])
-        .ok()
-        .and_then(|s| s.trim().parse::<usize>().ok())
-        .unwrap_or(0);
+    let commits_pulled: usize = repo
+        .run_command(&[
+            "rev-list",
+            "--count",
+            "--end-of-options",
+            &format!("HEAD..{remote_ref}"),
+        ])
+        .with_context(|| format!("Failed to count commits behind {remote_ref}"))?
+        .trim()
+        .parse()
+        .context("Unexpected non-numeric rev-list output")?;
 
     if commits_pulled == 0 {
         eprintln!(
@@ -48,7 +54,7 @@ pub fn pull() -> anyhow::Result<PullResult> {
     //    (and changes nothing) when the local branch has diverged or when
     //    uncommitted changes would be overwritten — surface git's message
     //    rather than clobbering anything.
-    repo.run_command(&["merge", "--ff-only", &remote_ref])
+    repo.run_command(&["merge", "--ff-only", "--end-of-options", &remote_ref])
         .with_context(|| {
             format!(
                 "Cannot fast-forward {branch} to {remote_ref} — the local branch has diverged (you may have unpushed commits) or has conflicting uncommitted changes. Run `wt wip push` or reconcile manually."
