@@ -187,4 +187,22 @@ mod tests {
         };
         assert!(format!("{err:#}").contains("wt wip pull"), "got: {err:#}");
     }
+
+    #[test]
+    fn first_push_sets_upstream() {
+        let (_dir, clone) = setup();
+        // A brand-new local branch has no upstream yet — exercises the
+        // `-u` first-push path.
+        git(&clone, &["checkout", "-b", "feature"]);
+        fs::write(clone.join("wip.txt"), "wip\n").unwrap();
+        let result = in_dir(&clone, || push(None, None)).unwrap();
+        assert_eq!(result.outcome, PushOutcome::Pushed);
+        assert!(result.commits_pushed >= 1);
+        let out = Command::new("git")
+            .args(["rev-parse", "--abbrev-ref", "feature@{upstream}"])
+            .current_dir(&clone)
+            .output()
+            .unwrap();
+        assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "origin/feature");
+    }
 }

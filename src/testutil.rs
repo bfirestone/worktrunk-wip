@@ -6,11 +6,16 @@
 //! runs them concurrently by default. A lock private to one module can't
 //! prevent another module's tests from racing it, so every test that
 //! touches either piece of global state must share this one lock.
+//!
+//! Restoration is RAII-based (an `EnvGuard` whose `Drop` restores cwd and
+//! `WORKTRUNK_CONFIG_PATH`) and lock acquisition tolerates poison, so a
+//! panicking test still restores global state and releases the lock
+//! cleanly instead of cascading into unrelated failures elsewhere.
 
 use std::ffi::OsString;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard, PoisonError};
 
 /// Serializes every test (across push/pull/config) that touches the
 /// process cwd or `WORKTRUNK_CONFIG_PATH`.
@@ -27,38 +32,62 @@ pub(crate) fn configure(clone: &Path) {
     git(clone, &["config", "commit.gpgsign", "false"]);
 }
 
+/// Acquire `TEST_LOCK`, tolerating poison left by an earlier test's panic
+/// — a prior failure must not cascade into `PoisonError` failures in
+/// unrelated tests.
+fn lock() -> MutexGuard<'static, ()> {
+    TEST_LOCK.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// Restores the previous cwd and `WORKTRUNK_CONFIG_PATH` on drop — runs
+/// even if the closure passed to `in_dir`/`with_env_config` panics, since
+/// this guard is dropped during unwind. Holds `TEST_LOCK` (via `_lock`)
+/// until restoration is complete, releasing it only once state is back to
+/// how the test found it.
+struct EnvGuard {
+    prev_dir: Option<PathBuf>,
+    prev_config: Option<OsString>,
+    _lock: MutexGuard<'static, ()>,
+}
+
+impl Drop for EnvGuard {
+    fn drop(&mut self) {
+        if let Some(dir) = self.prev_dir.take() {
+            let _ = std::env::set_current_dir(dir);
+        }
+        match self.prev_config.take() {
+            Some(v) => unsafe { std::env::set_var("WORKTRUNK_CONFIG_PATH", v) },
+            None => unsafe { std::env::remove_var("WORKTRUNK_CONFIG_PATH") },
+        }
+    }
+}
+
 /// Run `f` with the process cwd set to `dir` and `WORKTRUNK_CONFIG_PATH`
 /// pointed at a nonexistent path (isolating any in-process config lookup
 /// from the developer's real user config), holding `TEST_LOCK` for the
-/// duration. Restores both before releasing the lock.
+/// duration. Both are restored by `EnvGuard::drop`, so restoration still
+/// happens if `f` panics.
 pub(crate) fn in_dir<T>(dir: &Path, f: impl FnOnce() -> T) -> T {
-    let _guard = TEST_LOCK.lock().unwrap();
-    let prev_dir = std::env::current_dir().unwrap();
-    let prev_config = std::env::var_os("WORKTRUNK_CONFIG_PATH");
+    let _guard = EnvGuard {
+        prev_dir: Some(std::env::current_dir().unwrap()),
+        prev_config: std::env::var_os("WORKTRUNK_CONFIG_PATH"),
+        _lock: lock(),
+    };
     std::env::set_current_dir(dir).unwrap();
     unsafe { std::env::set_var("WORKTRUNK_CONFIG_PATH", dir.join("no-such-config.toml")) };
-    let out = f();
-    std::env::set_current_dir(prev_dir).unwrap();
-    restore_env_config(prev_config);
-    out
+    f()
 }
 
 /// Run `f` with `WORKTRUNK_CONFIG_PATH` set to `path`, holding `TEST_LOCK`
 /// for the duration (serializes against the cwd/env mutations `in_dir`
-/// performs for push/pull tests too). Restores the previous value (or
-/// absence) before releasing.
+/// performs for push/pull tests too). Restored by `EnvGuard::drop`, so
+/// restoration still happens if `f` panics.
 pub(crate) fn with_env_config<T>(path: &Path, f: impl FnOnce() -> T) -> T {
-    let _guard = TEST_LOCK.lock().unwrap();
-    let prev_config = std::env::var_os("WORKTRUNK_CONFIG_PATH");
+    let _guard = EnvGuard {
+        prev_dir: None,
+        prev_config: std::env::var_os("WORKTRUNK_CONFIG_PATH"),
+        _lock: lock(),
+    };
     unsafe { std::env::set_var("WORKTRUNK_CONFIG_PATH", path) };
-    let out = f();
-    restore_env_config(prev_config);
-    out
-}
-
-fn restore_env_config(prev: Option<OsString>) {
-    match prev {
-        Some(v) => unsafe { std::env::set_var("WORKTRUNK_CONFIG_PATH", v) },
-        None => unsafe { std::env::remove_var("WORKTRUNK_CONFIG_PATH") },
-    }
+    f()
 }
