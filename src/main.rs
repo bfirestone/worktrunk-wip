@@ -12,6 +12,7 @@ mod types;
 mod util;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
+use worktrunk::styling::eprintln;
 
 use types::StageMode;
 
@@ -19,11 +20,11 @@ const STAGING_HELP: &str = r#"## Staging
 
 Controls what to stage before the wip checkpoint commit:
 
-| Value   | Behavior                                                          |
-|---------|--------------------------------------------------------------------|
+| Value   | Behavior                                                               |
+|---------|------------------------------------------------------------------------|
 | all     | Stage everything: untracked files + unstaged tracked changes (default) |
-| tracked | Stage tracked changes only (like `git add -u`)                    |
-| none    | Stage nothing, commit only what's already in the index            |
+| tracked | Stage tracked changes only (like `git add -u`)                         |
+| none    | Stage nothing, commit only what's already in the index                 |
 
 Configure the default in worktrunk's user or project config:
 
