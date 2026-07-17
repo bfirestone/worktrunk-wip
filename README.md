@@ -85,6 +85,12 @@ feel native.
 ## Install
 
 ```bash
+cargo install worktrunk-wip
+```
+
+Or from source:
+
+```bash
 git clone https://github.com/bfirestone/worktrunk-wip
 cd worktrunk-wip
 cargo install --path .
