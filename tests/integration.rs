@@ -220,3 +220,122 @@ fn pull_preserves_dirty_non_conflicting_tree() {
         "precious\n"
     );
 }
+
+// ---------------------------------------------------------------------------
+// `wt wip get` — opt-in E2E, gated on WT_WIP_E2E.
+//
+// `get` shells out to the real `wt switch`, so these tests need worktrunk on
+// PATH. They stay off by default (a machine without `wt` shouldn't fail CI)
+// and are enabled with `WT_WIP_E2E=1`. The unit tests in `src/get.rs` already
+// cover the `wt`-free reuse+fast-forward path hermetically; these cover the
+// provisioning path those can't.
+// ---------------------------------------------------------------------------
+
+/// Is `wt --version` runnable?
+fn wt_on_path() -> bool {
+    Command::new("wt")
+        .arg("--version")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+/// Whether the opt-in E2E suite should run. Off unless `WT_WIP_E2E` is set to
+/// something other than empty/`0`. When it *is* set but `wt` is missing, fail
+/// loudly rather than skip silently — the opt-in asked for real coverage, so a
+/// broken environment should surface, not hide.
+fn e2e_enabled() -> bool {
+    match std::env::var("WT_WIP_E2E").ok().as_deref() {
+        None | Some("") | Some("0") => return false,
+        Some(_) => {}
+    }
+    assert!(
+        wt_on_path(),
+        "WT_WIP_E2E is set but `wt` is not on PATH — install worktrunk or unset WT_WIP_E2E"
+    );
+    true
+}
+
+fn get_json(dir: &Path, args: &[&str]) -> serde_json::Value {
+    let out = wip(dir, args, &[]);
+    assert_ok(&out);
+    serde_json::from_slice(&out.stdout).expect("get emits exactly one JSON object on stdout")
+}
+
+#[test]
+fn e2e_get_tracks_remote_branch_then_reuses() {
+    if !e2e_enabled() {
+        eprintln!("skipping e2e_get_tracks_remote_branch_then_reuses (set WT_WIP_E2E=1 with `wt` installed)");
+        return;
+    }
+    let (_dir, a, _b) = setup();
+
+    // Simulate WIP pushed from another machine: create `feat` with content,
+    // push it, then drop the local branch so it lives only on the remote.
+    git(&a, &["checkout", "-b", "feat"]);
+    fs::write(a.join("feat.txt"), "wip from elsewhere\n").unwrap();
+    git(&a, &["add", "-A"]);
+    git(&a, &["commit", "-m", "feat wip"]);
+    git(&a, &["push", "-u", "origin", "feat"]);
+    git(&a, &["checkout", "main"]);
+    git(&a, &["branch", "-D", "feat"]);
+    git(&a, &["fetch", "origin"]); // make origin/feat a known remote-tracking ref
+
+    // First get provisions a worktree tracking origin/feat.
+    let v = get_json(&a, &["get", "feat", "--format", "json"]);
+    assert_eq!(v["branch"], "feat");
+    assert_eq!(v["created"], true);
+    let wt_path = v["worktree_path"]
+        .as_str()
+        .expect("worktree_path is a string");
+    let feat_file = Path::new(wt_path).join("feat.txt");
+    assert!(
+        feat_file.exists(),
+        "provisioned worktree carries feat's content ({wt_path})"
+    );
+    assert_eq!(
+        fs::read_to_string(&feat_file).unwrap(),
+        "wip from elsewhere\n"
+    );
+
+    // Second get is idempotent: it reuses the worktree rather than reprovisioning.
+    let v = get_json(&a, &["get", "feat", "--format", "json"]);
+    assert_eq!(v["created"], false);
+    assert_eq!(v["pull_outcome"], "up-to-date");
+}
+
+#[test]
+fn e2e_get_create_is_opt_in_for_new_branches() {
+    if !e2e_enabled() {
+        eprintln!("skipping e2e_get_create_is_opt_in_for_new_branches (set WT_WIP_E2E=1 with `wt` installed)");
+        return;
+    }
+    let (_dir, a, _b) = setup();
+
+    // A branch that exists nowhere: without --create, get must refuse and point
+    // at the flag rather than silently inventing a branch.
+    let out = wip(&a, &["get", "brand-new"], &[]);
+    assert!(
+        !out.status.success(),
+        "get without --create must refuse an unknown branch"
+    );
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("--create"),
+        "the refusal names the --create escape hatch"
+    );
+
+    // With --create it provisions a fresh branch. No upstream exists, so the
+    // fast-forward step is a deliberate no-op (not a `git fetch` failure).
+    let v = get_json(&a, &["get", "brand-new", "--create", "--format", "json"]);
+    assert_eq!(v["branch"], "brand-new");
+    assert_eq!(v["created"], true);
+    assert_eq!(v["pull_outcome"], "up-to-date");
+    assert_eq!(v["commits_pulled"], 0);
+    let wt_path = v["worktree_path"]
+        .as_str()
+        .expect("worktree_path is a string");
+    assert!(
+        Path::new(wt_path).exists(),
+        "the new worktree exists on disk"
+    );
+}
