@@ -4,6 +4,7 @@
 //! makes it available as `wt wip`.
 
 mod config;
+mod get;
 mod pull;
 mod push;
 #[cfg(test)]
@@ -67,6 +68,28 @@ enum Command {
         #[arg(long, value_enum, default_value_t = Format::Text, help_heading = "Automation")]
         format: Format,
     },
+
+    /// Materialize a branch's WIP into a worktree, then fast-forward it
+    ///
+    /// Worktrunk-native convenience for the receiving machine: provisions the
+    /// worktree via `wt switch` (no history rewrite) and fast-forwards it to
+    /// the remote. Requires `wt` on PATH.
+    Get {
+        /// Branch to materialize and bring up to date
+        branch: String,
+
+        /// Create the branch if it doesn't exist yet
+        ///
+        /// By default `get` only tracks a branch that already exists (locally
+        /// or on the remote) and errors otherwise. `--create` makes a brand-new
+        /// branch as a fallback — never for one that already exists remotely.
+        #[arg(short = 'c', long)]
+        create: bool,
+
+        /// Output format
+        #[arg(long, value_enum, default_value_t = Format::Text, help_heading = "Automation")]
+        format: Format,
+    },
 }
 
 #[derive(Args)]
@@ -105,6 +128,16 @@ fn main() {
     let result = match cli.command {
         Some(Command::Push(args)) => run_push(args),
         Some(Command::Pull { format }) => pull::pull().and_then(|r| {
+            if format == Format::Json {
+                println!("{}", serde_json::to_string(&r)?);
+            }
+            Ok(())
+        }),
+        Some(Command::Get {
+            branch,
+            create,
+            format,
+        }) => get::get(&branch, create).and_then(|r| {
             if format == Format::Json {
                 println!("{}", serde_json::to_string(&r)?);
             }

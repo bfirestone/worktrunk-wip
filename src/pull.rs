@@ -10,9 +10,15 @@ use crate::types::{PullOutcome, PullResult};
 use crate::util::resolve_remote;
 
 pub fn pull() -> anyhow::Result<PullResult> {
-    let repo = Repository::current()?;
+    pull_in(&Repository::current()?)
+}
+
+/// Fetch and fast-forward `repo`'s current branch. Split out from [`pull`]
+/// so `wt-wip get` can run the exact same safe primitive inside a freshly
+/// provisioned worktree — any [`Repository`], not just the process cwd.
+pub fn pull_in(repo: &Repository) -> anyhow::Result<PullResult> {
     let branch = repo.require_current_branch("wip pull")?;
-    let remote = resolve_remote(&repo, &branch)?;
+    let remote = resolve_remote(repo, &branch)?;
 
     // 1. Fetch the branch from the remote.
     eprintln!(

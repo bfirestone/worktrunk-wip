@@ -77,8 +77,10 @@ feel native.
 
 - **git** ≥ 2.24 (uses `--end-of-options`)
 - **Rust toolchain** to build (`cargo`)
-- **worktrunk** — optional but recommended; only needed for the `wt wip`
-  spelling and for `wt merge` squashing. `wt-wip` runs standalone without it.
+- **worktrunk** — optional but recommended for `push`/`pull` (needed only for
+  the `wt wip` spelling and `wt merge` squashing; `wt-wip push`/`pull` run
+  standalone without it). **Required for `wt wip get`**, which provisions
+  worktrees by shelling out to `wt switch`.
 - A git remote your machines can both reach (GitHub, GitLab, a bare repo on a
   server you SSH to — anything).
 
@@ -164,6 +166,34 @@ them in, and resolve the remote the same way git does for pushes
 (`branch.<name>.pushRemote` → `remote.pushDefault` → `branch.<name>.remote`),
 falling back to `origin`.
 
+### `wt wip get`
+
+```
+wt wip get <branch> [--create] [--format <text|json>]
+```
+
+The "sit down at a fresh machine" companion to `pull`. Where `pull` updates the
+branch you *already* have checked out, `get` materializes a branch you don't
+have a worktree for here yet — typically one you pushed WIP to from another
+machine — and brings it up to date. It runs, in order:
+
+1. **Locate or provision.** If a worktree for `<branch>` already exists, reuse
+   it (so `get` is safe to re-run). Otherwise create one via worktrunk's own
+   `wt switch`, so the worktree lands where worktrunk's placement, config, and
+   hooks put it.
+2. **Fast-forward.** Run the same fast-forward-only sync as `wt wip pull`
+   inside that worktree. A freshly created branch with no upstream skips this
+   step — there's nothing to fast-forward from.
+
+Unlike `push`/`pull`, `get` is worktrunk-native and **requires `wt` on PATH**.
+Because a subprocess can't change your shell's directory, `get` prints the
+worktree path — `cd` there to start working.
+
+| Flag | Effect |
+|------|--------|
+| `-c, --create` | Create `<branch>` when it exists *nowhere* yet. Off by default: `get` otherwise only tracks a branch that already exists locally or on the remote, and errors on an unknown name. It is never applied to a branch that already exists on the remote — that case is always tracked, never shadowed by a new divergent branch. |
+| `--format json` | Print a machine-readable result object to stdout. |
+
 ### Exit codes
 
 | Code | Meaning |
@@ -221,6 +251,9 @@ $ wt wip push --format json
 
 $ wt wip pull --format json
 {"branch":"feat/parser","remote":"origin","outcome":"fast-forwarded","commits_pulled":2}
+
+$ wt wip get feat/parser --format json
+{"branch":"feat/parser","remote":"origin","worktree_path":"/home/you/code/repo-feat-parser","created":true,"pull_outcome":"up-to-date","commits_pulled":0}
 ```
 
 **Push result fields:**
@@ -235,6 +268,11 @@ $ wt wip pull --format json
 
 **Pull result fields:** `branch`, `remote`, `outcome`
 (`"fast-forwarded"` \| `"up-to-date"`), `commits_pulled`.
+
+**Get result fields:** `branch`, `remote`, `worktree_path` (absolute path of
+the worktree `get` landed on), `created` (`true` if `get` provisioned it this
+run, `false` if it already existed), `pull_outcome` (`"fast-forwarded"` \|
+`"up-to-date"`), `commits_pulled`.
 
 Example: checkpoint from a cron job, but only alert when something moved:
 
@@ -320,26 +358,30 @@ end. The invariant is that *`wt wip` itself* never rewrites anything.)
 
 ```
 src/
-├── main.rs       # clap CLI: push/pull + bare shorthand, JSON output
+├── main.rs       # clap CLI: push/pull/get + bare shorthand, JSON output
 ├── push.rs       # stage → checkpoint → append-only push
-├── pull.rs       # fetch → ff-only merge
+├── pull.rs       # fetch → ff-only merge (pull_in: reusable core)
+├── get.rs        # provision worktree via wt switch → ff-only pull
 ├── config.rs     # [wip] stage resolution from worktrunk config
 ├── types.rs      # StageMode, Push/PullResult (serde contracts)
 ├── util.rs       # wip message, remote resolution
 └── testutil.rs   # shared test lock/harness (cfg(test) only)
 tests/
 ├── guard.rs      # destructive-git source scan
-└── integration.rs# 9 end-to-end tests driving the compiled binary
+└── integration.rs# end-to-end tests; wt-dependent get tests gated on WT_WIP_E2E
 ```
 
 ```bash
-cargo test                                  # 28 tests: unit + guard + e2e
+cargo test                                  # 32 tests: unit + guard + e2e
 cargo fmt --all --check                     # enforced in CI
 cargo clippy --all-targets -- -D warnings   # enforced in CI
 ```
 
 The end-to-end tests build real bare-remote + clone fixtures in temp dirs —
-no network, no mocks. CI runs the full gate on Linux and macOS.
+no network, no mocks. CI runs the full gate on Linux and macOS. The `wt wip
+get` provisioning tests additionally shell out to a real `wt` binary and are
+gated behind `WT_WIP_E2E=1` (skipped by default, so a machine without
+worktrunk installed still passes `cargo test`).
 
 Built on the published [`worktrunk`](https://crates.io/crates/worktrunk)
 library crate (`git::Repository`, `styling`, config-path discovery), so
@@ -357,8 +399,10 @@ attributable to a machine, and get CI for free if you want it.
 which would force-push, which breaks the other machine's fast-forward pull.
 Append-only is what makes the loop safe in both directions.
 
-**Does it work without worktrunk?** Yes — call `wt-wip` directly. Worktrunk
-only provides the `wt wip` spelling and the `wt merge` cleanup convenience.
+**Does it work without worktrunk?** `push` and `pull` do — call `wt-wip`
+directly; worktrunk only provides the `wt wip` spelling and the `wt merge`
+cleanup convenience. `get` is the exception: it provisions worktrees through
+`wt switch`, so it needs worktrunk on PATH.
 
 **What about branches with no remote counterpart yet?** First `wt wip` on a
 branch pushes with `-u`, creating the remote branch and setting upstream
