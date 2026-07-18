@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 description = "wt wip — append-only cross-machine WIP sync for worktrunk"
 license = "MIT"
+repository = "https://github.com/bfirestone/worktrunk-wip"
 
 [[bin]]
 name = "wt-wip"
