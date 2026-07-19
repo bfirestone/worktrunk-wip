@@ -58,10 +58,17 @@ pub fn push(stage: Option<StageMode>, message: Option<String>) -> anyhow::Result
             .and_then(|s| s.trim().parse::<usize>().ok())
             .unwrap_or(0)
     } else {
-        repo.run_command(&["rev-list", "--count", "HEAD"])
+        // First push: count only what the remote is missing. `--not
+        // --remotes=<remote>` subtracts everything already reachable from
+        // the remote's tracking refs, so shared mainline history isn't
+        // counted as "sent" (plain `--count HEAD` would report the branch's
+        // entire ancestry). If the count fails, fall back to whether this
+        // run made a checkpoint rather than a made-up constant.
+        let exclude = format!("--remotes={remote}");
+        repo.run_command(&["rev-list", "--count", "HEAD", "--not", &exclude])
             .ok()
             .and_then(|s| s.trim().parse::<usize>().ok())
-            .unwrap_or(1)
+            .unwrap_or(usize::from(committed.is_some()))
     };
 
     // 4. Push (append-only). Set upstream on the first push with -u.
@@ -222,7 +229,10 @@ mod tests {
         fs::write(clone.join("wip.txt"), "wip\n").unwrap();
         let result = in_dir(&clone, || push(None, None)).unwrap();
         assert_eq!(result.outcome, PushOutcome::Pushed);
-        assert!(result.commits_pushed >= 1);
+        // Exactly 1: only the wip checkpoint is new to the remote. The seed
+        // commit shared with main must not be counted (regression: the old
+        // `rev-list --count HEAD` reported the branch's entire ancestry).
+        assert_eq!(result.commits_pushed, 1);
         let out = Command::new("git")
             .args(["rev-parse", "--abbrev-ref", "feature@{upstream}"])
             .current_dir(&clone)

@@ -264,7 +264,7 @@ $ wt wip get feat/parser --format json
 | `remote` | string | Remote it was pushed to. |
 | `committed` | string \| null | SHA of the checkpoint commit created this run; `null` if nothing was staged. |
 | `outcome` | `"pushed"` \| `"up-to-date"` | Whether anything actually moved. |
-| `commits_pushed` | number | Commits sent (0 when up to date). |
+| `commits_pushed` | number | Commits sent (0 when up to date). A first push counts only commits the remote doesn't already have. |
 
 **Pull result fields:** `branch`, `remote`, `outcome`
 (`"fast-forwarded"` \| `"up-to-date"`), `commits_pulled`.
@@ -348,9 +348,12 @@ end. The invariant is that *`wt wip` itself* never rewrites anything.)
   unless the move is a pure fast-forward.
 - **Failures change nothing.** Every error path was tested to leave HEAD,
   the index, and the working tree untouched.
-- **Enforced, not promised:** `tests/guard.rs` scans the entire `src/` tree
-  and fails the build if a forbidden git invocation ever appears — in code,
-  comments, or help text. CI runs it on every push.
+- **Enforced, not promised:** `tests/guard.rs` scans the runtime source in
+  `src/` (test fixtures excluded) and fails the build if a forbidden git
+  token ever appears — any `--force` flavor, `reset`, `checkout`, `clean`,
+  `stash`, `update-ref`, `--delete`, `--hard`. It's a tripwire against the
+  careless case; the behavioral tests above are the proof. CI runs it on
+  every push.
 - **Uncommitted work survives pulls.** A dirty-but-non-conflicting tree
   fast-forwards under you without being touched (covered by tests).
 

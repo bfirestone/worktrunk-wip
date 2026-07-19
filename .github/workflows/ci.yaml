@@ -20,6 +20,8 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      - name: Typos
+        uses: crate-ci/typos@v1.45.0
       - name: Format
         run: cargo fmt --all --check
       - name: Clippy
