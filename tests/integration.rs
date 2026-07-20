@@ -6,7 +6,14 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 fn git(dir: &Path, args: &[&str]) {
+    // Force `main` as the default branch for every `git init`/`clone` here,
+    // so these end-to-end tests are hermetic regardless of the ambient
+    // `init.defaultBranch`. Without this, a runner where it defaults to
+    // `master` leaves the bare remote's HEAD pointing at a nonexistent
+    // `master`, so later clones never check out `main` and fetch/push
+    // against `main` fail. `-c` scopes the override to this one invocation.
     let st = Command::new("git")
+        .args(["-c", "init.defaultBranch=main"])
         .args(args)
         .current_dir(dir)
         .status()

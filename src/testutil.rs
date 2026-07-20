@@ -22,7 +22,15 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 pub(crate) static TEST_LOCK: Mutex<()> = Mutex::new(());
 
 pub(crate) fn git(dir: &Path, args: &[&str]) {
+    // Force `main` as the default branch for every `git init`/`clone` the
+    // harness runs, so the suite is hermetic regardless of the ambient
+    // `init.defaultBranch`. Without this, a runner where it defaults to
+    // `master` (e.g. a CI job that doesn't configure git) leaves the bare
+    // remote's HEAD pointing at a nonexistent `master`, so later clones
+    // never check out `main` and fetch/push against `main` fail. `-c`
+    // scopes the override to this one invocation.
     let st = Command::new("git")
+        .args(["-c", "init.defaultBranch=main"])
         .args(args)
         .current_dir(dir)
         .status()
