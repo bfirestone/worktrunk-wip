@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.1](https://github.com/bfirestone/worktrunk-wip/compare/v0.2.0...v0.2.1) (2026-07-20)
+
+
+### Bug Fixes
+
+* **test:** make git test harness hermetic to init.defaultBranch ([00a17ae](https://github.com/bfirestone/worktrunk-wip/commit/00a17ae7d6eef221e113076e2209087329c211d9))
+* **test:** make git test harness hermetic to init.defaultBranch ([6ca9f63](https://github.com/bfirestone/worktrunk-wip/commit/6ca9f63164d1bbb8b166629869dd71aa20242b30))
+
 ## [0.2.0](https://github.com/bfirestone/worktrunk-wip/compare/v0.1.0...v0.2.0) (2026-07-20)
 
 
