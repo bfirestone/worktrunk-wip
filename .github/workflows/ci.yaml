@@ -26,9 +26,10 @@ jobs:
         run: cargo fmt --all --check
       - name: Clippy
         run: cargo clippy --all-targets -- -D warnings
+      # No global git config setup: the test harness is hermetic (it sets
+      # per-clone identity and forces `init.defaultBranch=main` itself), so
+      # this job runs git in the same bare state as the release workflow.
+      # Configuring git here would mask any future environment-dependency
+      # regression on the gate while it still broke the release job.
       - name: Test
-        run: |
-          git config --global user.name ci
-          git config --global user.email ci@example.com
-          git config --global init.defaultBranch main
-          cargo test
+        run: cargo test
