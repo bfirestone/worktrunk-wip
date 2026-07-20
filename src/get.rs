@@ -59,7 +59,7 @@ pub fn get(branch: &str, create: bool) -> anyhow::Result<GetResult> {
             );
             (path, false)
         }
-        None => (provision_worktree(branch, create)?, true),
+        None => (provision_worktree(&repo, branch, create)?, true),
     };
 
     // 2. Fast-forward inside that worktree with the safe pull primitive.
@@ -119,13 +119,18 @@ pub fn get(branch: &str, create: bool) -> anyhow::Result<GetResult> {
 /// tracks the branch when it already exists locally or on the remote — the
 /// normal "receive WIP pushed from another machine" case.
 ///
-/// `--create` is opt-in and only takes effect as a *fallback* when tracking
-/// fails (the branch exists nowhere). It is deliberately never passed to a
-/// branch that already exists on the remote: worktrunk's `switch --create`
-/// would warn and build a divergent new-branch-from-base instead of tracking,
-/// which is exactly the WIP-loss `get` exists to prevent. So the only path to
-/// `switch --create` is "plain switch failed *and* the caller asked for it."
-fn provision_worktree(branch: &str, create: bool) -> anyhow::Result<PathBuf> {
+/// A failed `wt switch` does not by itself mean the branch is missing: a
+/// dirty tree, a failing hook, or a network error also exit non-zero. So
+/// before deciding anything, the refs are checked directly. If the branch
+/// exists, the failure is reported as `wt switch` failing (its own stderr,
+/// inherited, names the real cause) — never as "branch not found".
+///
+/// `--create` is opt-in and only takes effect once the branch is confirmed
+/// absent both locally and on the remote. It is deliberately never passed to
+/// a branch that exists: worktrunk's `switch --create` would warn and build a
+/// divergent new-branch-from-base instead of tracking, which is exactly the
+/// WIP-loss `get` exists to prevent.
+fn provision_worktree(repo: &Repository, branch: &str, create: bool) -> anyhow::Result<PathBuf> {
     eprintln!(
         "{}",
         progress_message(cformat!(
@@ -138,8 +143,17 @@ fn provision_worktree(branch: &str, create: bool) -> anyhow::Result<PathBuf> {
         return locate_worktree(branch);
     }
 
-    // Attempt 2: only if the caller opted in, create the branch fresh. Reached
-    // only when tracking failed, so this can't shadow a remote branch.
+    // `wt switch` failed. Distinguish "the branch doesn't exist" from every
+    // other failure mode before blaming the branch or touching `--create`.
+    if branch_exists(repo, branch)? {
+        bail!(
+            "`wt switch {branch}` failed even though `{branch}` exists — \
+             see worktrunk's output above for the actual cause"
+        );
+    }
+
+    // Attempt 2: the branch is confirmed absent; create it fresh, but only
+    // if the caller opted in.
     if create {
         eprintln!(
             "{}",
@@ -157,6 +171,34 @@ fn provision_worktree(branch: &str, create: bool) -> anyhow::Result<PathBuf> {
         "Branch `{branch}` was not found locally or on the remote. If it is new, \
          re-run with `--create` to start it here."
     )
+}
+
+/// Whether `branch` exists as a local head or on the sync remote. `wt
+/// switch` reports failure only through its exit status, so this is how
+/// `get` tells "the branch is missing" apart from a dirty tree, a failing
+/// hook, or a network error. Best-effort on the remote side: if `ls-remote`
+/// can't reach the remote it reads as "absent" — the same view a failed
+/// `wt switch` had of it.
+fn branch_exists(repo: &Repository, branch: &str) -> anyhow::Result<bool> {
+    let head_ref = format!("refs/heads/{branch}");
+    if repo.run_command_check(&[
+        "show-ref",
+        "--verify",
+        "--quiet",
+        "--end-of-options",
+        &head_ref,
+    ])? {
+        return Ok(true);
+    }
+    let remote = resolve_remote(repo, branch)?;
+    repo.run_command_check(&[
+        "ls-remote",
+        "--exit-code",
+        "--heads",
+        "--end-of-options",
+        &remote,
+        &head_ref,
+    ])
 }
 
 /// Run one `wt switch` variant, inheriting stderr so worktrunk's own progress
@@ -256,5 +298,58 @@ mod tests {
         assert!(!result.created);
         assert_eq!(result.pull_outcome, PullOutcome::UpToDate);
         assert_eq!(result.commits_pulled, 0);
+    }
+
+    /// Run `f` with a fake always-failing `wt` shadowing the real one on
+    /// PATH — simulating a dirty-tree refusal, failing hook, or network
+    /// error inside `wt switch`. Must run inside `in_dir` so the test lock
+    /// serializes the PATH mutation.
+    fn with_failing_wt<T>(root: &Path, f: impl FnOnce() -> T) -> T {
+        use std::os::unix::fs::PermissionsExt;
+        let bin = root.join("fake-bin");
+        fs::create_dir_all(&bin).unwrap();
+        let wt = bin.join("wt");
+        fs::write(&wt, "#!/bin/sh\nexit 1\n").unwrap();
+        fs::set_permissions(&wt, fs::Permissions::from_mode(0o755)).unwrap();
+        let prev = std::env::var_os("PATH").unwrap_or_default();
+        let mut paths = vec![bin];
+        paths.extend(std::env::split_paths(&prev));
+        unsafe { std::env::set_var("PATH", std::env::join_paths(paths).unwrap()) };
+        let out = f();
+        unsafe { std::env::set_var("PATH", prev) };
+        out
+    }
+
+    #[test]
+    fn failed_wt_switch_on_existing_branch_is_not_misdiagnosed() {
+        let (dir, a, feat_wt) = setup();
+        // Drop the worktree (the branch survives) so `get` must provision.
+        git(&a, &["worktree", "remove", feat_wt.to_str().unwrap()]);
+        // Even with --create, a failing `wt switch` on an existing branch
+        // must surface the failure — not claim the branch is missing, and
+        // never fall through to `switch --create` (which would build the
+        // divergent branch this path exists to prevent).
+        let err = match in_dir(&a, || with_failing_wt(dir.path(), || get("feat", true))) {
+            Err(e) => e,
+            Ok(_) => panic!("expected get() to fail when wt switch fails"),
+        };
+        let msg = format!("{err:#}");
+        assert!(msg.contains("failed even though"), "got: {msg}");
+        assert!(!msg.contains("not found"), "got: {msg}");
+    }
+
+    #[test]
+    fn missing_branch_without_create_reports_not_found() {
+        let (dir, a, _feat_wt) = setup();
+        let err = match in_dir(&a, || with_failing_wt(dir.path(), || get("ghost", false))) {
+            Err(e) => e,
+            Ok(_) => panic!("expected get() to fail for a missing branch"),
+        };
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("was not found locally or on the remote"),
+            "got: {msg}"
+        );
+        assert!(msg.contains("--create"), "got: {msg}");
     }
 }
